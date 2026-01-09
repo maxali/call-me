@@ -11,6 +11,7 @@ import {
 import {
   validateTwilioSignature,
   validateTelnyxSignature,
+  validateACSSignature,
   generateWebSocketToken,
   validateWebSocketToken,
 } from './webhook-security.js';
@@ -232,30 +233,59 @@ export class CallManager {
   private handlePhoneWebhook(req: IncomingMessage, res: ServerResponse): void {
     const contentType = req.headers['content-type'] || '';
 
-    // Telnyx sends JSON webhooks
+    // Both Telnyx and ACS send JSON webhooks - need to distinguish them
     if (contentType.includes('application/json')) {
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', async () => {
         try {
-          // Validate Telnyx signature if public key is configured
-          const telnyxPublicKey = this.config.providerConfig.telnyxPublicKey;
-          if (telnyxPublicKey) {
-            const signature = req.headers['telnyx-signature-ed25519'] as string | undefined;
-            const timestamp = req.headers['telnyx-timestamp'] as string | undefined;
-
-            if (!validateTelnyxSignature(telnyxPublicKey, signature, timestamp, body)) {
-              console.error('[Security] Rejecting Telnyx webhook: invalid signature');
-              res.writeHead(401);
-              res.end('Invalid signature');
-              return;
-            }
-          } else {
-            console.error('[Security] Warning: CALLME_TELNYX_PUBLIC_KEY not set, skipping signature verification');
-          }
-
           const event = JSON.parse(body);
-          await this.handleTelnyxWebhook(event, res);
+          
+          // Detect provider based on webhook structure or headers
+          const isTelnyx = req.headers['telnyx-signature-ed25519'] !== undefined ||
+                          event.data?.record_type?.startsWith('call');
+          const isACS = req.headers['x-ms-content-sha256'] !== undefined ||
+                       event.type?.startsWith('Microsoft.Communication');
+
+          if (isTelnyx) {
+            // Validate Telnyx signature if public key is configured
+            const telnyxPublicKey = this.config.providerConfig.telnyxPublicKey;
+            if (telnyxPublicKey) {
+              const signature = req.headers['telnyx-signature-ed25519'] as string | undefined;
+              const timestamp = req.headers['telnyx-timestamp'] as string | undefined;
+
+              if (!validateTelnyxSignature(telnyxPublicKey, signature, timestamp, body)) {
+                console.error('[Security] Rejecting Telnyx webhook: invalid signature');
+                res.writeHead(401);
+                res.end('Invalid signature');
+                return;
+              }
+            } else {
+              console.error('[Security] Warning: CALLME_TELNYX_PUBLIC_KEY not set, skipping signature verification');
+            }
+
+            await this.handleTelnyxWebhook(event, res);
+          } else if (isACS) {
+            // Validate ACS signature if connection string is configured
+            const connectionString = this.config.providerConfig.phoneAuthToken;
+            if (connectionString && connectionString.includes('accesskey=')) {
+              const signature = req.headers['x-ms-content-sha256'] as string | undefined;
+
+              if (!validateACSSignature(connectionString, signature, body)) {
+                console.error('[Security] Rejecting ACS webhook: invalid signature');
+                res.writeHead(401);
+                res.end('Invalid signature');
+                return;
+              }
+            } else {
+              console.error('[Security] Warning: ACS connection string not properly configured, skipping signature verification');
+            }
+
+            await this.handleACSWebhook(event, res);
+          } else {
+            // Assume Telnyx if we can't determine
+            await this.handleTelnyxWebhook(event, res);
+          }
         } catch (error) {
           console.error('Error parsing webhook:', error);
           res.writeHead(400);
@@ -419,6 +449,68 @@ export class CallManager {
       }
     } catch (error) {
       console.error(`Error handling webhook ${eventType}:`, error);
+    }
+  }
+
+  private async handleACSWebhook(event: any, res: ServerResponse): Promise<void> {
+    const eventType = event.type;
+    const callConnectionId = event.data?.callConnectionId;
+
+    console.error(`ACS webhook: ${eventType}`);
+
+    // Always respond 200 OK immediately
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+
+    if (!callConnectionId) return;
+
+    try {
+      switch (eventType) {
+        case 'Microsoft.Communication.CallConnected':
+          // Call was answered - start media streaming
+          let streamUrl = `wss://${new URL(this.config.publicUrl).host}/media-stream`;
+          const callId = this.callControlIdToCallId.get(callConnectionId);
+          if (callId) {
+            const state = this.activeCalls.get(callId);
+            if (state) {
+              streamUrl += `?token=${encodeURIComponent(state.wsToken)}`;
+            }
+          }
+          await this.config.providers.phone.startStreaming(callConnectionId, streamUrl);
+          console.error(`Started streaming for ACS call ${callConnectionId}`);
+          break;
+
+        case 'Microsoft.Communication.CallDisconnected':
+          // Call ended
+          const hangupCallId = this.callControlIdToCallId.get(callConnectionId);
+          if (hangupCallId) {
+            this.callControlIdToCallId.delete(callConnectionId);
+            const hangupState = this.activeCalls.get(hangupCallId);
+            if (hangupState) {
+              hangupState.hungUp = true;
+              hangupState.ws?.close();
+            }
+          }
+          break;
+
+        case 'Microsoft.Communication.MediaStreamingStarted':
+          // Media streaming is ready
+          const streamCallId = this.callControlIdToCallId.get(callConnectionId);
+          if (streamCallId) {
+            const streamState = this.activeCalls.get(streamCallId);
+            if (streamState) {
+              streamState.streamingReady = true;
+              console.error(`[${streamCallId}] ACS streaming ready`);
+            }
+          }
+          break;
+
+        case 'Microsoft.Communication.MediaStreamingStopped':
+          // Media streaming stopped
+          break;
+      }
+    } catch (error) {
+      console.error(`Error handling ACS webhook ${eventType}:`, error);
     }
   }
 
