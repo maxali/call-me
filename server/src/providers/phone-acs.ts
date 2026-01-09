@@ -17,7 +17,7 @@
  */
 
 import type { PhoneProvider, PhoneConfig } from './types.js';
-import { createHmac } from 'crypto';
+import { createHmac, createHash } from 'crypto';
 
 interface ACSCallResponse {
   callConnectionId: string;
@@ -183,7 +183,7 @@ export class ACSPhoneProvider implements PhoneProvider {
     
     // Compute content hash (SHA256 of body, empty string if no body)
     const contentHash = body 
-      ? createHmac('sha256', '').update(body).digest('base64')
+      ? createHash('sha256').update(body).digest('base64')
       : '';
 
     // Build string to sign

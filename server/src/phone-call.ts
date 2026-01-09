@@ -459,7 +459,7 @@ export class CallManager {
     const eventType = event.type;
     const callConnectionId = event.data?.callConnectionId;
 
-    console.error(`ACS webhook: ${eventType}`);
+    console.log(`ACS webhook: ${eventType}`);
 
     // Always respond 200 OK immediately
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -480,7 +480,7 @@ export class CallManager {
             }
           }
           await this.config.providers.phone.startStreaming(callConnectionId, streamUrl);
-          console.error(`Started streaming for ACS call ${callConnectionId}`);
+          console.log(`Started streaming for ACS call ${callConnectionId}`);
           break;
 
         case 'Microsoft.Communication.CallDisconnected':
@@ -503,7 +503,7 @@ export class CallManager {
             const streamState = this.activeCalls.get(streamCallId);
             if (streamState) {
               streamState.streamingReady = true;
-              console.error(`[${streamCallId}] ACS streaming ready`);
+              console.log(`[${streamCallId}] ACS streaming ready`);
             }
           }
           break;
