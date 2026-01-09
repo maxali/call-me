@@ -8,12 +8,13 @@
 import type { PhoneProvider, TTSProvider, RealtimeSTTProvider, ProviderRegistry } from './types.js';
 import { TelnyxPhoneProvider } from './phone-telnyx.js';
 import { TwilioPhoneProvider } from './phone-twilio.js';
+import { ACSPhoneProvider } from './phone-acs.js';
 import { OpenAITTSProvider } from './tts-openai.js';
 import { OpenAIRealtimeSTTProvider } from './stt-openai-realtime.js';
 
 export * from './types.js';
 
-export type PhoneProviderType = 'telnyx' | 'twilio';
+export type PhoneProviderType = 'telnyx' | 'twilio' | 'acs';
 
 export interface ProviderConfig {
   // Phone provider selection
@@ -22,6 +23,7 @@ export interface ProviderConfig {
   // Phone credentials (interpretation depends on provider)
   // Telnyx: accountSid = Connection ID, authToken = API Key
   // Twilio: accountSid = Account SID, authToken = Auth Token
+  // ACS: accountSid = Endpoint URL, authToken = Connection String or Access Key
   phoneAccountSid: string;
   phoneAuthToken: string;
   phoneNumber: string;
@@ -63,6 +65,8 @@ export function createPhoneProvider(config: ProviderConfig): PhoneProvider {
 
   if (config.phoneProvider === 'twilio') {
     provider = new TwilioPhoneProvider();
+  } else if (config.phoneProvider === 'acs') {
+    provider = new ACSPhoneProvider();
   } else {
     provider = new TelnyxPhoneProvider();
   }
@@ -110,9 +114,14 @@ export function validateProviderConfig(config: ProviderConfig): string[] {
   const errors: string[] = [];
 
   // Provider-specific credential descriptions
-  const credentialDesc = config.phoneProvider === 'twilio'
-    ? { accountSid: 'Twilio Account SID', authToken: 'Twilio Auth Token' }
-    : { accountSid: 'Telnyx Connection ID', authToken: 'Telnyx API Key' };
+  let credentialDesc;
+  if (config.phoneProvider === 'twilio') {
+    credentialDesc = { accountSid: 'Twilio Account SID', authToken: 'Twilio Auth Token' };
+  } else if (config.phoneProvider === 'acs') {
+    credentialDesc = { accountSid: 'ACS Endpoint URL', authToken: 'ACS Connection String' };
+  } else {
+    credentialDesc = { accountSid: 'Telnyx Connection ID', authToken: 'Telnyx API Key' };
+  }
 
   if (!config.phoneAccountSid) {
     errors.push(`Missing CALLME_PHONE_ACCOUNT_SID (${credentialDesc.accountSid})`);

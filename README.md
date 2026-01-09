@@ -18,7 +18,7 @@ Start a task, walk away. Your phone/watch rings when Claude is done, stuck, or n
 ### 1. Get Required Accounts
 
 You'll need:
-- **Phone provider**: [Telnyx](https://telnyx.com) or [Twilio](https://twilio.com)
+- **Phone provider**: [Telnyx](https://telnyx.com), [Twilio](https://twilio.com), or [Azure Communication Services](https://azure.microsoft.com/en-us/products/communication-services)
 - **OpenAI API key**: For speech-to-text and text-to-speech
 - **ngrok account**: Free at [ngrok.com](https://ngrok.com) (for webhook tunneling)
 
@@ -64,6 +64,36 @@ CALLME_PHONE_AUTH_TOKEN=<Auth Token>
 
 </details>
 
+<details>
+<summary><b>Option C: Azure Communication Services (Microsoft Teams Integration)</b></summary>
+
+1. Create an Azure account at [portal.azure.com](https://portal.azure.com)
+2. Create a Communication Services resource:
+   - Search for "Communication Services" in Azure Portal
+   - Click "Create" and fill in the details
+   - Note your **Endpoint** and **Connection String** (found in Keys section)
+3. [Purchase a phone number](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/telephony/get-phone-number):
+   - Go to your Communication Services resource > Phone Numbers
+   - Click "Get" to purchase a phone number (~$1/month)
+4. Configure webhook URL (after starting the server):
+   - Set callback URI to `https://your-ngrok-url/twiml`
+   - You can see your ngrok URL on the ngrok dashboard
+
+**Environment variables for Azure Communication Services:**
+```bash
+CALLME_PHONE_PROVIDER=acs
+CALLME_PHONE_ACCOUNT_SID=<Endpoint URL>
+CALLME_PHONE_AUTH_TOKEN=<Connection String>
+```
+
+**Benefits of ACS:**
+- Native integration with Microsoft Teams
+- Can optionally call Teams users directly
+- Competitive pricing (~$0.012/min)
+- Enterprise-grade security and compliance
+
+</details>
+
 ### 3. Set Environment Variables
 
 Add these to `~/.claude/settings.json` (recommended) or export them in your shell:
@@ -86,9 +116,9 @@ Add these to `~/.claude/settings.json` (recommended) or export them in your shel
 
 | Variable | Description |
 |----------|-------------|
-| `CALLME_PHONE_PROVIDER` | `telnyx` (default) or `twilio` |
-| `CALLME_PHONE_ACCOUNT_SID` | Telnyx Connection ID or Twilio Account SID |
-| `CALLME_PHONE_AUTH_TOKEN` | Telnyx API Key or Twilio Auth Token |
+| `CALLME_PHONE_PROVIDER` | `telnyx` (default), `twilio`, or `acs` (Azure Communication Services) |
+| `CALLME_PHONE_ACCOUNT_SID` | Telnyx Connection ID, Twilio Account SID, or ACS Endpoint URL |
+| `CALLME_PHONE_AUTH_TOKEN` | Telnyx API Key, Twilio Auth Token, or ACS Connection String |
 | `CALLME_PHONE_NUMBER` | Phone number Claude calls from (E.164 format) |
 | `CALLME_USER_PHONE_NUMBER` | Your phone number to receive calls |
 | `CALLME_OPENAI_API_KEY` | OpenAI API key (for TTS and realtime STT) |
@@ -192,12 +222,12 @@ await end_call({
 
 ## Costs
 
-| Service | Telnyx | Twilio |
-|---------|--------|--------|
-| Outbound calls | ~$0.007/min | ~$0.014/min |
-| Phone number | ~$1/month | ~$1.15/month |
+| Service | Telnyx | Twilio | Azure Communication Services |
+|---------|--------|--------|------------------------------|
+| Outbound calls | ~$0.007/min | ~$0.014/min | ~$0.012/min |
+| Phone number | ~$1/month | ~$1.15/month | ~$1/month |
 
-Plus OpenAI costs (same for both providers):
+Plus OpenAI costs (same for all providers):
 - **Speech-to-text**: ~$0.006/min (Whisper)
 - **Text-to-speech**: ~$0.02/min (TTS)
 
