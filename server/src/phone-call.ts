@@ -76,9 +76,12 @@ export class CallManager {
   private wss: WebSocketServer | null = null;
   private config: ServerConfig;
   private currentCallId = 0;
+  private publicUrlHost: string;
 
   constructor(config: ServerConfig) {
     this.config = config;
+    // Cache the host part to avoid repeated URL parsing
+    this.publicUrlHost = new URL(config.publicUrl).host;
   }
 
   startServer(): void {
@@ -367,7 +370,7 @@ export class CallManager {
 
     // For 'in-progress' or 'ringing' status, return TwiML to start media stream
     // Include security token in the stream URL
-    let streamUrl = `wss://${new URL(this.config.publicUrl).host}/media-stream`;
+    let streamUrl = `wss://${this.publicUrlHost}/media-stream`;
 
     // Find the call state to get the WebSocket token
     if (callSid) {
@@ -404,7 +407,7 @@ export class CallManager {
 
         case 'call.answered':
           // Include security token in the stream URL
-          let streamUrl = `wss://${new URL(this.config.publicUrl).host}/media-stream`;
+          let streamUrl = `wss://${this.publicUrlHost}/media-stream`;
           const callId = this.callControlIdToCallId.get(callControlId);
           if (callId) {
             const state = this.activeCalls.get(callId);
@@ -468,7 +471,7 @@ export class CallManager {
       switch (eventType) {
         case 'Microsoft.Communication.CallConnected':
           // Call was answered - start media streaming
-          let streamUrl = `wss://${new URL(this.config.publicUrl).host}/media-stream`;
+          let streamUrl = `wss://${this.publicUrlHost}/media-stream`;
           const callId = this.callControlIdToCallId.get(callConnectionId);
           if (callId) {
             const state = this.activeCalls.get(callId);

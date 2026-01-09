@@ -17,6 +17,7 @@
  */
 
 import type { PhoneProvider, PhoneConfig } from './types.js';
+import { createHmac } from 'crypto';
 
 interface ACSCallResponse {
   callConnectionId: string;
@@ -34,6 +35,8 @@ interface ACSErrorResponse {
 
 export class ACSPhoneProvider implements PhoneProvider {
   readonly name = 'acs';
+  private static readonly API_VERSION = '2023-01-15-preview';
+  
   private connectionString: string | null = null;
   private endpoint: string | null = null;
   private accessKey: string | null = null;
@@ -62,7 +65,7 @@ export class ACSPhoneProvider implements PhoneProvider {
       this.accessKey = config.authToken;
     }
 
-    console.error(`Phone provider: Azure Communication Services`);
+    console.log(`Phone provider: Azure Communication Services`);
   }
 
   async initiateCall(to: string, from: string, webhookUrl: string): Promise<string> {
@@ -70,9 +73,7 @@ export class ACSPhoneProvider implements PhoneProvider {
       throw new Error('ACS not initialized');
     }
 
-    // Generate HMAC signature for authentication
-    const apiVersion = '2023-01-15-preview';
-    const url = `${this.endpoint}/calling/callConnections?api-version=${apiVersion}`;
+    const url = `${this.endpoint}/calling/callConnections?api-version=${ACSPhoneProvider.API_VERSION}`;
     
     // Create call request body
     const requestBody = {
@@ -92,13 +93,15 @@ export class ACSPhoneProvider implements PhoneProvider {
       },
     };
 
+    const body = JSON.stringify(requestBody);
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': this.generateAuthHeader('POST', url),
+        ...this.generateAuthHeaders('POST', url, body),
       },
-      body: JSON.stringify(requestBody),
+      body,
     });
 
     if (!response.ok) {
@@ -124,7 +127,7 @@ export class ACSPhoneProvider implements PhoneProvider {
     // ACS media streaming is configured during call creation
     // This method is kept for interface compatibility
     // In practice, ACS sends streaming.started event to the webhook when ready
-    console.error('ACS streaming configured during call creation');
+    console.log('ACS streaming configured during call creation');
   }
 
   /**
@@ -135,14 +138,11 @@ export class ACSPhoneProvider implements PhoneProvider {
       throw new Error('ACS not initialized');
     }
 
-    const apiVersion = '2023-01-15-preview';
-    const url = `${this.endpoint}/calling/callConnections/${callConnectionId}?api-version=${apiVersion}`;
+    const url = `${this.endpoint}/calling/callConnections/${callConnectionId}?api-version=${ACSPhoneProvider.API_VERSION}`;
 
     const response = await fetch(url, {
       method: 'DELETE',
-      headers: {
-        'Authorization': this.generateAuthHeader('DELETE', url),
-      },
+      headers: this.generateAuthHeaders('DELETE', url),
     });
 
     if (!response.ok && response.status !== 404) {
@@ -162,19 +162,52 @@ export class ACSPhoneProvider implements PhoneProvider {
   }
 
   /**
-   * Generate HMAC-SHA256 authentication header for ACS REST API
+   * Generate HMAC-SHA256 authentication headers for ACS REST API
+   * 
+   * ACS uses HMAC-SHA256 for request authentication:
+   * 1. Create string to sign: METHOD\nPATH\nQUERY\nDATE\nHOST\nCONTENT_HASH
+   * 2. Sign with access key using HMAC-SHA256
+   * 3. Add Authorization header with signature
+   * 
+   * @see https://learn.microsoft.com/en-us/rest/api/communication/
    */
-  private generateAuthHeader(method: string, url: string): string {
-    if (!this.accessKey) {
-      throw new Error('Access key not available');
+  private generateAuthHeaders(method: string, fullUrl: string, body?: string): Record<string, string> {
+    if (!this.accessKey || !this.endpoint) {
+      throw new Error('Access key or endpoint not available');
     }
 
-    // For simplicity in this initial implementation, we'll use a simple bearer token approach
-    // In production, you'd want to generate proper HMAC signatures
-    // The ACS SDK typically handles this automatically
+    const url = new URL(fullUrl);
+    const pathAndQuery = url.pathname + url.search;
+    const host = url.host;
+    const date = new Date().toUTCString();
     
-    // Note: This is a simplified version. In production, use @azure/communication-calling
-    // or @azure/communication-common for proper authentication
-    return `Bearer ${this.accessKey}`;
+    // Compute content hash (SHA256 of body, empty string if no body)
+    const contentHash = body 
+      ? createHmac('sha256', '').update(body).digest('base64')
+      : '';
+
+    // Build string to sign
+    const stringToSign = [
+      method.toUpperCase(),
+      pathAndQuery,
+      date,
+      host,
+      contentHash,
+    ].join('\n');
+
+    // Sign with access key using HMAC-SHA256
+    const decodedKey = Buffer.from(this.accessKey, 'base64');
+    const signature = createHmac('sha256', decodedKey)
+      .update(stringToSign)
+      .digest('base64');
+
+    // Build authorization header
+    const authHeader = `HMAC-SHA256 SignedHeaders=date;host;x-ms-content-sha256&Signature=${signature}`;
+
+    return {
+      'x-ms-date': date,
+      'x-ms-content-sha256': contentHash,
+      'Authorization': authHeader,
+    };
   }
 }
