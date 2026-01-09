@@ -241,14 +241,22 @@ export class CallManager {
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', async () => {
+        let event: any;
         try {
-          const event = JSON.parse(body);
-          
+          event = JSON.parse(body);
+        } catch (error) {
+          console.error('Error parsing webhook JSON:', error);
+          res.writeHead(400);
+          res.end('Invalid JSON');
+          return;
+        }
+        
+        try {
           // Detect provider based on webhook structure or headers
           const isTelnyx = req.headers['telnyx-signature-ed25519'] !== undefined ||
-                          event.data?.record_type?.startsWith('call');
+                          (event.data && typeof event.data.record_type === 'string' && event.data.record_type.startsWith('call'));
           const isACS = req.headers['x-ms-content-sha256'] !== undefined ||
-                       event.type?.startsWith('Microsoft.Communication');
+                       (event.type && typeof event.type === 'string' && event.type.startsWith('Microsoft.Communication'));
 
           if (isTelnyx) {
             // Validate Telnyx signature if public key is configured
@@ -286,13 +294,16 @@ export class CallManager {
 
             await this.handleACSWebhook(event, res);
           } else {
-            // Assume Telnyx if we can't determine
-            await this.handleTelnyxWebhook(event, res);
+            // Could not determine provider - log warning and reject
+            console.error('[Security] Cannot determine webhook provider type. Headers:', req.headers);
+            console.error('[Security] Webhook body structure:', JSON.stringify(event, null, 2).substring(0, 500));
+            res.writeHead(400);
+            res.end('Unable to determine webhook provider');
           }
         } catch (error) {
-          console.error('Error parsing webhook:', error);
-          res.writeHead(400);
-          res.end('Invalid JSON');
+          console.error('Error handling webhook:', error);
+          res.writeHead(500);
+          res.end('Internal server error');
         }
       });
       return;

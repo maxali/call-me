@@ -49,15 +49,16 @@ export class ACSPhoneProvider implements PhoneProvider {
     
     // Parse connection string to extract endpoint and access key
     // Format: endpoint=https://xxx.communication.azure.com/;accesskey=xxx
-    if (this.connectionString.includes('endpoint=')) {
-      const endpointMatch = this.connectionString.match(/endpoint=([^;]+)/);
-      const keyMatch = this.connectionString.match(/accesskey=([^;]+)/);
+    if (this.connectionString.includes('endpoint=') && this.connectionString.includes('accesskey=')) {
+      // Use more robust regex to extract components
+      const endpointMatch = this.connectionString.match(/endpoint=([^;]+);/);
+      const keyMatch = this.connectionString.match(/accesskey=([^;]+)($|;)/);
       
       if (endpointMatch && keyMatch) {
         this.endpoint = endpointMatch[1];
         this.accessKey = keyMatch[1];
       } else {
-        throw new Error('Invalid ACS connection string format');
+        throw new Error('Invalid ACS connection string format. Expected: endpoint=<url>;accesskey=<key>');
       }
     } else {
       // Alternative: accountSid as endpoint, authToken as access key
@@ -152,20 +153,25 @@ export class ACSPhoneProvider implements PhoneProvider {
   }
 
   /**
-   * Get XML/TwiML-like response for connecting media stream
-   * ACS doesn't use TwiML - returns empty for compatibility
+   * Get XML response for connecting media stream (used in webhooks)
+   * ACS does not use TwiML/XML - media streaming is configured via API
    */
   getStreamConnectXml(_streamUrl: string): string {
     // ACS doesn't use TwiML/XML responses
-    // Media streaming is configured via API, not XML
+    // This method should not be called for ACS - if it is, log a warning
+    console.warn('getStreamConnectXml() called on ACS provider - ACS uses API-based streaming, not XML');
     return '';
   }
 
   /**
    * Generate HMAC-SHA256 authentication headers for ACS REST API
    * 
-   * ACS uses HMAC-SHA256 for request authentication:
-   * 1. Create string to sign: METHOD\nPATH\nQUERY\nDATE\nHOST\nCONTENT_HASH
+   * NOTE: This implements a common Azure HMAC-SHA256 authentication pattern.
+   * If authentication fails, you may need to adjust the string-to-sign format
+   * based on the latest ACS API documentation.
+   * 
+   * ACS typically uses HMAC-SHA256 for request authentication:
+   * 1. Create string to sign: METHOD\nPATH_AND_QUERY\nDATE\nHOST\nCONTENT_HASH
    * 2. Sign with access key using HMAC-SHA256
    * 3. Add Authorization header with signature
    * 
