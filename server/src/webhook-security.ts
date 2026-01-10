@@ -1,5 +1,5 @@
 /**
- * Webhook Security - Signature verification for Twilio and Telnyx
+ * Webhook Security - Signature verification for Twilio, Telnyx, and Azure Communication Services
  *
  * Prevents unauthorized requests to webhook endpoints by validating
  * cryptographic signatures from phone providers.
@@ -146,6 +146,59 @@ function formatEd25519PublicKey(publicKeyBase64: string): string {
   // Convert to PEM format
   const base64Der = derEncoded.toString('base64');
   return `-----BEGIN PUBLIC KEY-----\n${base64Der}\n-----END PUBLIC KEY-----`;
+}
+
+/**
+ * Validate Azure Communication Services webhook signature
+ *
+ * Azure Communication Services uses HMAC-SHA256 for webhook authentication.
+ * The signature is sent in the x-ms-content-sha256 header.
+ *
+ * Algorithm:
+ * 1. Compute HMAC-SHA256 of the raw request body
+ * 2. Compare with the signature in the header
+ *
+ * @see https://learn.microsoft.com/en-us/azure/communication-services/concepts/call-automation/incoming-call-notification
+ */
+export function validateACSSignature(
+  connectionString: string,
+  signature: string | undefined,
+  body: string
+): boolean {
+  if (!signature) {
+    console.error('[Security] Missing x-ms-content-sha256 header for ACS webhook');
+    return false;
+  }
+
+  try {
+    // Extract access key from connection string
+    // Format: endpoint=https://...;accesskey=...
+    const keyMatch = connectionString.match(/accesskey=([^;]+)/);
+    if (!keyMatch) {
+      console.error('[Security] Cannot extract access key from ACS connection string');
+      return false;
+    }
+
+    const accessKey = keyMatch[1];
+
+    // Compute HMAC-SHA256 of the request body
+    const expectedSignature = createHmac('sha256', accessKey)
+      .update(body)
+      .digest('base64');
+
+    const valid = signature === expectedSignature;
+
+    if (!valid) {
+      console.error('[Security] ACS signature mismatch');
+      console.error(`[Security] Expected: ${expectedSignature}`);
+      console.error(`[Security] Received: ${signature}`);
+    }
+
+    return valid;
+  } catch (error) {
+    console.error('[Security] ACS signature verification error:', error);
+    return false;
+  }
 }
 
 /**
